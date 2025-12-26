@@ -85,6 +85,7 @@ docker logs <container-name>
 |---------|-----|----------|----------|
 | Airflow | http://localhost:8080 | admin | admin |
 | Superset | http://localhost:8088 | admin | admin |
+| dbt Docs | http://localhost:5001/docs/ | - | - |
 | ClickHouse | http://localhost:8123 | default | clickhouse123 |
 
 ### 4. Stop Services
@@ -269,6 +270,12 @@ dbt test
 dbt docs generate
 ```
 
+**Documentation:**
+
+The dbt documentation is automatically generated and served by the Webhook Server.
+- URL: http://localhost:5001/docs/
+- Contains lineage graphs, model descriptions, and schema information.
+
 ### Webhook Server (Automation)
 
 Flask server that receives webhooks from Airflow and executes dbt.
@@ -279,6 +286,7 @@ Flask server that receives webhooks from Airflow and executes dbt.
 |--------|----------|-------------|
 | POST | `/webhook/manual` | Airflow trigger |
 | POST | `/webhook` | External trigger |
+| GET | `/docs/` | dbt Documentation |
 | GET | `/health` | Health check |
 | GET | `/status` | Service status |
 
@@ -303,6 +311,18 @@ BI platform for creating dashboards.
 3. Settings → Database Connections → + Database
 4. Select "ClickHouse"
 5. SQLAlchemy URI: `clickhouse+native://default:clickhouse123@clickhouse-server:9000/analytics`
+
+**Pre-configured Dashboard:**
+
+The system automatically creates a dashboard named **"E-commerce Analytics"** containing:
+- **Revenue by State:** Bar chart showing sales performance across states.
+- **Orders by State:** Volume of orders per state.
+- **Sales Distribution:** Pie chart of revenue contribution.
+
+The dashboard features:
+- Cross-filtering (clicking a state filters other charts)
+- Optimized 2-row layout
+- Auto-refresh capabilities
 
 ## Data Flow
 
