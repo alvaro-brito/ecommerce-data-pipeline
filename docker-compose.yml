@@ -1,0 +1,195 @@
+services:
+  # ============================================================================
+  # PostgreSQL Source (OLTP)
+  # ============================================================================
+  postgres-source:
+    image: postgres:15-alpine
+    container_name: postgres-source
+    environment:
+      POSTGRES_USER: ecommerce
+      POSTGRES_PASSWORD: ecommerce123
+      POSTGRES_DB: ecommerce_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecommerce"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-pipeline
+
+  # ============================================================================
+  # ClickHouse (Data Warehouse)
+  # ============================================================================
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+    environment:
+      CLICKHOUSE_DB: ecommerce
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse123
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - ecommerce-pipeline
+
+  # ============================================================================
+  # Airflow Database (PostgreSQL)
+  # ============================================================================
+  airflow-db:
+    image: postgres:13-alpine
+    container_name: airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-pipeline
+
+  # ============================================================================
+  # Airflow Webserver
+  # ============================================================================
+  airflow-webserver:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: airflow-webserver
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__CORE__DAG_DISCOVERY_SAFE_MODE: "false"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    networks:
+      - ecommerce-pipeline
+    restart: unless-stopped
+
+  # ============================================================================
+  # Airflow Scheduler
+  # ============================================================================
+  airflow-scheduler:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__BASE_LOG_FOLDER: /opt/airflow/logs
+      AIRFLOW__CORE__DAG_DISCOVERY_SAFE_MODE: "false"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    networks:
+      - ecommerce-pipeline
+    restart: unless-stopped
+    command: airflow scheduler
+
+  # ============================================================================
+  # dbt / webhook (Transformações - Automação Dbt)
+  # ============================================================================
+  webhook-server:
+    build:
+      context: ./dbt
+      dockerfile: Dockerfile
+    container_name: webhook-server
+    working_dir: /usr/app
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./dbt:/usr/app
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+    networks:
+      - ecommerce-pipeline
+    command: python webhook_server.py
+    restart: unless-stopped
+
+  # ============================================================================
+  # Apache Superset (Visualização)
+  # ============================================================================
+  superset:
+    image: apache/superset:3.1.0
+    container_name: superset
+    depends_on:
+      - postgres-source
+      - clickhouse-server
+    environment:
+      SUPERSET_SECRET_KEY: "your-secret-key-change-this"
+      SUPERSET_CONFIG_PATH: "/app/superset_config.py"
+      SUPERSET_ADMIN_USERNAME: admin
+      SUPERSET_ADMIN_PASSWORD: admin
+      SUPERSET_ADMIN_EMAIL: admin@example.com
+      SUPERSET_ADMIN_FIRSTNAME: Admin
+      SUPERSET_ADMIN_LASTNAME: User
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_data:/var/lib/superset
+      - ./superset/config/superset_config.py:/app/superset_config.py
+    networks:
+      - ecommerce-pipeline
+    command: bash -c "pip install clickhouse-connect -q && superset db upgrade && superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@example.com 2>/dev/null || true && superset init && superset run -h 0.0.0.0 -p 8088"
+    restart: unless-stopped
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  ecommerce-pipeline:
+    driver: bridge
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  airflow_db_data:
+  superset_data:

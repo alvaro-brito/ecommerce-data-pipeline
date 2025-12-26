@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: raw
+    database: raw
+    schema: raw
+    tables:
+      - name: customers
+      - name: products
+      - name: orders
+      - name: order_items
+
+models:
+  - name: stg_customers
+    description: "Staging layer for customers"
+  - name: stg_products
+    description: "Staging layer for products with calculated profit margin"
+  - name: stg_orders
+    description: "Staging layer for orders with date dimensions"
+  - name: stg_order_items
+    description: "Staging layer for order items"
